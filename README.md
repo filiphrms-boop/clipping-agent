@@ -5,6 +5,9 @@ short-form clips — automatically.
 
 ## Pipeline
 
+0. **Scout** (`scout_campaigns.py`) — reads the public Content Rewards board and
+   ranks live campaigns by *how little you have to do before you get paid*.
+   No credentials needed; the board API is public.
 1. **Transcribe** (`transcribe.py`) — word-level timestamps.
    Uses **mlx-whisper** on Apple Silicon (GPU, much faster) and falls back to
    **faster-whisper** (CPU int8) everywhere else. The output JSON is identical
