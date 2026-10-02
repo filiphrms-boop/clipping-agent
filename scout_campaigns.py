@@ -147,6 +147,18 @@ def analyse(c):
         "tier1_risk": bool(tier1),
         "requires_application": bool(c.get("requiresApplication")),
         "fresh_slot": spent == 0 and (m.get("approvedSubmissionCount") or 0) == 0,
+        # A campaign that ships a brand asset pack can be cut immediately, the way
+        # Flip Master does. A UGC campaign means shooting your own footage, which
+        # is a different job entirely.
+        "asset_links": sum(1 for r in (c.get("referenceMaterials") or [])
+                           if r.get("mediaType") == "external"),
+        "ref_videos": sum(1 for r in (c.get("referenceMaterials") or [])
+                          if r.get("type") == "video"),
+        # check the NAME too — "GLP-1 UGC • $3 CPM" says UGC in the title while
+        # its description never uses the word, so a description-only test misses it
+        "is_ugc": bool(re.search(
+            r"\b(ugc|record your own|your own gameplay|film yourself|show your face)\b",
+            desc + " " + (c.get("name") or ""), re.I)),
     }
 
 
@@ -170,6 +182,14 @@ def main():
     ap.add_argument("--platform", default=None, help="must allow this platform")
     ap.add_argument("--json", default=None)
     ap.add_argument("--top", type=int, default=30)
+    ap.add_argument("--min-platforms", type=int, default=None,
+                    help="only campaigns allowing at least N platforms")
+    ap.add_argument("--fresh-only", action="store_true",
+                    help="untouched budget, no approved submissions yet")
+    ap.add_argument("--has-assets", action="store_true",
+                    help="ships a brand asset pack or reference videos")
+    ap.add_argument("--no-ugc", action="store_true",
+                    help="exclude campaigns that want you to shoot your own footage")
     args = ap.parse_args()
 
     print("reading the public Content Rewards board (no credentials needed) ...")
@@ -183,21 +203,30 @@ def main():
         rows = [r for r in rows if r["gate"] <= args.max_gate]
     if args.platform:
         rows = [r for r in rows if args.platform in (r["platforms"] or [])]
+    if args.min_platforms:
+        rows = [r for r in rows if len(r["platforms"] or []) >= args.min_platforms]
+    if args.fresh_only:
+        rows = [r for r in rows if r["fresh_slot"]]
+    if args.has_assets:
+        rows = [r for r in rows if r["asset_links"] or r["ref_videos"]]
+    if args.no_ugc:
+        rows = [r for r in rows if not r["is_ugc"]]
     rows = [r for r in rows if r["remaining"] > 0]
     rows.sort(key=score, reverse=True)
 
-    print(f"{'campaign':58} {'cpm':>5} {'gate':>7} {'cap':>6} {'left':>9} "
-          f"{'plats':>5} {'age':>6} {'spent':>6} {'t1':>3} {'fresh':>5}")
-    print("-" * 124)
+    print(f"{'campaign':52} {'cpm':>5} {'gate':>6} {'cap':>5} {'left':>8} "
+          f"{'pl':>3} {'age':>5} {'spent':>6} {'t1':>3} {'new':>4} {'pack':>6}")
+    print("-" * 122)
     for r in rows[:args.top]:
         cpm = f"${r['cpm']:.2f}" if r["cpm"] else "  -"
         cap = f"${r['cap']:.0f}" if r["cap"] else "-"
         age = f"{r['age_h']:.0f}h" if r["age_h"] is not None else "-"
         spent = f"{r['spent'] / r['budget']:.0%}" if r["budget"] else "-"
-        print(f"{r['name']:58} {cpm:>5} {r['gate']:>7,} {cap:>6} "
-              f"${r['remaining']:>8,.0f} {len(r['platforms']):>5} {age:>6} "
+        pack = f"{r['asset_links']}L/{r['ref_videos']}v" if (r["asset_links"] or r["ref_videos"]) else "-"
+        print(f"{r['name']:52} {cpm:>5} {r['gate']:>6,} {cap:>5} "
+              f"${r['remaining']:>7,.0f} {len(r['platforms']):>3} {age:>5} "
               f"{spent:>6} {'YES' if r['tier1_risk'] else ' no':>3} "
-              f"{'yes' if r['fresh_slot'] else '':>5}")
+              f"{'new' if r['fresh_slot'] else '':>4} {pack:>6}")
 
     print("\n  gate = views a clip needs on ONE platform before it earns anything")
     print("  t1   = description carries an audience-location (Tier-1) style clause")
