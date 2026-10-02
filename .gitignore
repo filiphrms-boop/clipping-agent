@@ -1,0 +1,22 @@
+# generated media / data — these get large and are per-run, not source
+input/*
+!input/.gitkeep
+output/*
+!output/.gitkeep
+transcripts/*
+!transcripts/.gitkeep
+clips/*
+!clips/.gitkeep
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# env / secrets
+.env
+*.key
+
+# os cruft
+.DS_Store
