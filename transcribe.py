@@ -10,7 +10,12 @@ The output JSON shape is identical either way, so downstream stages
 (select_clips.py, render.py) never need to know which one ran.
 
 Usage:
-    python3 transcribe.py input/video.mp4 transcripts/video.json [model_size]
+    python3 transcribe.py input/video.mp4 transcripts/video.json [model_size] [language]
+
+`language` is an ISO-639-1 code (e.g. "sr", "en"). Leave it off to let
+Whisper auto-detect — but pin it whenever you know it. Auto-detection
+drifts badly across closely-related languages (Serbian/Croatian/Bosnian,
+Danish/Norwegian), and a wrong guess poisons every downstream stage.
 """
 import json
 import sys
@@ -38,34 +43,37 @@ def _mlx_available():
         return False
 
 
-def _transcribe_mlx(input_path, model_size):
+def _transcribe_mlx(input_path, model_size, language=None):
     import mlx_whisper
 
     repo = MLX_REPOS.get(model_size, model_size if "/" in model_size else MLX_REPOS["small"])
-    print(f"[transcribe] backend=mlx-whisper model={repo} (Apple Silicon GPU)")
+    print(f"[transcribe] backend=mlx-whisper model={repo} language={language or 'auto'} (Apple Silicon GPU)")
     result = mlx_whisper.transcribe(
-        input_path, path_or_hf_repo=repo, word_timestamps=True, verbose=False
+        input_path, path_or_hf_repo=repo, word_timestamps=True, verbose=False,
+        language=language,
     )
     return result.get("segments", []), result.get("language")
 
 
-def _transcribe_faster(input_path, model_size):
+def _transcribe_faster(input_path, model_size, language=None):
     from faster_whisper import WhisperModel
 
-    print(f"[transcribe] backend=faster-whisper model={model_size} (CPU int8)")
+    print(f"[transcribe] backend=faster-whisper model={model_size} language={language or 'auto'} (CPU int8)")
     model = WhisperModel(model_size, device="cpu", compute_type="int8")
-    segments, info = model.transcribe(input_path, word_timestamps=True, vad_filter=True)
+    segments, info = model.transcribe(input_path, word_timestamps=True, vad_filter=True,
+                                      language=language)
     return list(segments), info.language
 
 
-def transcribe(input_path: str, output_path: str, model_size: str = "small"):
+def transcribe(input_path: str, output_path: str, model_size: str = "small",
+               language: str | None = None):
     if _mlx_available():
-        raw_segments, language = _transcribe_mlx(input_path, model_size)
+        raw_segments, detected = _transcribe_mlx(input_path, model_size, language)
         print(f"[transcribe] transcribing {input_path} ...")
     else:
-        raw_segments, language = _transcribe_faster(input_path, model_size)
+        raw_segments, detected = _transcribe_faster(input_path, model_size, language)
 
-    result = {"language": language, "duration": 0.0, "segments": []}
+    result = {"language": detected, "duration": 0.0, "segments": []}
     full_text_parts = []
 
     for idx, seg in enumerate(raw_segments):
@@ -118,7 +126,8 @@ def transcribe(input_path: str, output_path: str, model_size: str = "small"):
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
-        print("usage: python3 transcribe.py <input_media> <output_json> [model_size]")
+        print("usage: python3 transcribe.py <input_media> <output_json> [model_size] [language]")
         sys.exit(1)
     size = sys.argv[3] if len(sys.argv) > 3 else "small"
-    transcribe(sys.argv[1], sys.argv[2], size)
+    lang = sys.argv[4] if len(sys.argv) > 4 else None
+    transcribe(sys.argv[1], sys.argv[2], size, lang)

@@ -133,7 +133,11 @@ def build_ass(words, clip_start, clip_end, font, size, outline, upper=True):
         "ScriptType: v4.00+",
         f"PlayResX: {W}",
         f"PlayResY: {H}",
-        "WrapStyle: 2",
+        # WrapStyle 0 = smart wrapping. WrapStyle 2 disables wrapping ENTIRELY,
+        # so a long chunk runs off the frame edge and gets clipped instead of
+        # breaking onto a second line. Serbian words are long and the captions
+        # are uppercased, so this is not hypothetical.
+        "WrapStyle: 0",
         "ScaledBorderAndShadow: yes",
         "",
         "[V4+ Styles]",
@@ -186,30 +190,67 @@ def build_ass(words, clip_start, clip_end, font, size, outline, upper=True):
     return "\n".join(lines) + "\n"
 
 
-def build_filter(layout, ass_name, captions=True):
+def _focus_expr(focus):
+    """ffmpeg expression for the crop x-offset that centres `focus`.
+
+    `focus` is where the subject sits in the SOURCE frame as a fraction of
+    width (0 = hard left, 0.5 = centre, 1 = hard right), or a list of
+    {"t": seconds, "x": fraction} keyframes, linearly interpolated between.
+
+    Written in terms of in_w so it stays correct whatever the source aspect
+    is: after force_original_aspect_ratio=increase the frame is wider than the
+    output, and we slide the window so the subject lands mid-frame.
+    """
+    if isinstance(focus, (list, tuple)):
+        ks = sorted(((float(k["t"]), float(k["x"])) for k in focus), key=lambda p: p[0])
+        if not ks:
+            expr = repr(0.5)          # empty keyframe list -> centred
+        else:
+            expr = repr(ks[-1][1])
+            for (t0, x0), (t1, x1) in zip(reversed(ks[:-1]), reversed(ks[1:])):
+                seg = f"{x0}+({x1}-{x0})*(t-{t0})/({t1}-{t0})"
+                expr = f"if(lt(t,{t1}),{seg},{expr})"
+    else:
+        expr = repr(float(focus))
+    # commas separate filter args, so every comma *inside* the expression
+    # must be escaped or ffmpeg reads the expression as two arguments
+    return f"max(0,min(in_w-{W},({expr})*in_w-{W}/2))".replace(",", "\\,")
+
+
+def build_filter(layout, ass_name, captions=True, focus=None):
     """pad = blurred background behind the whole 16:9 frame (nothing cropped).
 
     crop = fill the frame and cut the sides. Good for a single centred speaker,
     cuts people off in wide or multi-person shots.
+
+    focus (crop only) = where in the source the subject sits; see _focus_expr.
+    Omit it and the crop is centred, which is wrong for any two-shot.
     """
     pad = (f"[0:v]split=2[bga][fga];"
            f"[bga]scale={W}:{H}:force_original_aspect_ratio=increase,"
            f"crop={W}:{H},gblur=sigma=28[bgb];"
            f"[fga]scale={W}:-2[fgc];"
            f"[bgb][fgc]overlay=(W-w)/2:(H-h)/2[base]")
-    crop = (f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,"
-            f"crop={W}:{H}[base]")
-    head = crop if layout == "crop" else pad
+    if layout == "crop":
+        base = f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,"
+        head = (base + f"crop={W}:{H}[base]") if focus is None else \
+               (base + f"crop={W}:{H}:{_focus_expr(focus)}:0[base]")
+    else:
+        head = pad
     tail = f"[base]ass={ass_name}[v]" if captions else "[base]null[v]"
     return f"{head};{tail}"
 
 
 def render_clip(source_video, transcript, clip, out_dir, index, ffmpeg,
                 layout="pad", font="Arial Black", size=72, outline=7,
-                captions=True, crf=20):
+                captions=True, crf=20, focus=None):
     start, end = float(clip["start"]), float(clip["end"])
     if end <= start:
         raise ValueError(f"clip {index}: end ({end}) must be greater than start ({start})")
+
+    # per-clip framing wins over the CLI default: in a two-shot the crop has to
+    # slide onto whoever is speaking, and that differs from clip to clip
+    clip_focus = clip.get("focus", clip.get("focus_x", focus))
 
     slug = "".join(c if c.isalnum() else "_" for c in clip["title"]).strip("_")[:40]
     base = f"{index:02d}_{slug}"
@@ -239,7 +280,8 @@ def render_clip(source_video, transcript, clip, out_dir, index, ffmpeg,
         ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
         "-ss", f"{start:.3f}", "-t", f"{end - start:.3f}",
         "-i", str(Path(source_video).resolve()),
-        "-filter_complex", build_filter(layout, sub_name, captions=have_captions),
+        "-filter_complex", build_filter(layout, sub_name, captions=have_captions,
+                                        focus=clip_focus),
         "-map", "[v]", "-map", "0:a?",
         "-c:v", "libx264", "-preset", "medium", "-crf", str(crf),
         "-pix_fmt", "yuv420p", "-r", "30",
@@ -256,7 +298,7 @@ def render_clip(source_video, transcript, clip, out_dir, index, ffmpeg,
 
 
 def main(source_video, transcript_path, candidates_path, out_dir,
-         layout="pad", font="Arial Black", size=72, captions=True):
+         layout="pad", font="Arial Black", size=72, captions=True, focus=None):
     ffmpeg = find_ffmpeg()
     with open(transcript_path, "r", encoding="utf-8") as f:
         transcript = json.load(f)
@@ -269,23 +311,41 @@ def main(source_video, transcript_path, candidates_path, out_dir,
         print(f"[render] clip {i}: {title} ({clip['start']:.1f}-{clip['end']:.1f})")
         outputs.append(render_clip(source_video, transcript, clip, out_dir, i,
                                    ffmpeg, layout=layout, font=font, size=size,
-                                   captions=captions))
+                                   captions=captions, focus=focus))
 
     print(f"[render] done — {len(outputs)} clips in {out_dir}")
     return outputs
 
 
 if __name__ == "__main__":
-    args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    flags = [a for a in sys.argv[1:] if a.startswith("--")]
-    if len(args) < 4:
+    # Parse flag/value PAIRS properly. The old version filtered out every token
+    # starting with "--" and then took argv[0:4] positionally, so
+    # `render.py --layout crop src json cand out` silently read "crop" as the
+    # source video. A flag's VALUE must be consumed along with its flag.
+    argv = sys.argv[1:]
+    kw, positional, i = {}, [], 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--layout":
+            kw["layout"] = argv[i + 1]; i += 2
+        elif a == "--focus-x":
+            kw["focus"] = float(argv[i + 1]); i += 2
+        elif a == "--font":
+            kw["font"] = argv[i + 1]; i += 2
+        elif a == "--size":
+            kw["size"] = int(argv[i + 1]); i += 2
+        elif a == "--no-captions":
+            kw["captions"] = False; i += 1
+        elif a.startswith("--"):
+            print(f"unknown flag: {a}")
+            sys.exit(2)
+        else:
+            positional.append(a); i += 1
+
+    if len(positional) < 4:
         print("usage: python3 render.py <source_video> <transcript_json> "
-              "<candidates_json> <out_dir> [--layout pad|crop] [--no-captions]")
+              "<candidates_json> <out_dir> [--layout pad|crop] [--focus-x 0..1] "
+              "[--font NAME] [--size N] [--no-captions]")
         sys.exit(1)
 
-    kw = {}
-    if "--layout" in flags:
-        kw["layout"] = sys.argv[sys.argv.index("--layout") + 1]
-    if "--no-captions" in flags:
-        kw["captions"] = False
-    main(args[0], args[1], args[2], args[3], **kw)
+    main(positional[0], positional[1], positional[2], positional[3], **kw)
