@@ -1,45 +1,278 @@
 # Clipping Agent
 
-Turns a long-form video (podcast, stream, webinar) into captioned, 9:16
-short-form clips — automatically.
+Turns a long-form video (podcast, stream, webinar, gameplay capture) into
+captioned, 9:16 short-form clips.
 
-## Pipeline
+**Nothing here publishes anything.** Every stage writes files to disk. Posting,
+scheduling and campaign submission are deliberate human actions — see
+[Human in the loop](#human-in-the-loop).
 
-0. **Scout** (`scout_campaigns.py`) — reads the public Content Rewards board and
-   ranks live campaigns by *how little you have to do before you get paid*.
-   No credentials needed; the board API is public.
-1. **Transcribe** (`transcribe.py`) — word-level timestamps.
-   Uses **mlx-whisper** on Apple Silicon (GPU, much faster) and falls back to
-   **faster-whisper** (CPU int8) everywhere else. The output JSON is identical
-   either way, so no downstream stage needs to care which ran.
-2. **Select clips** (`select_clips.py`) — sends the transcript to Claude, gets
-   back candidate clips with start/end timestamps, a title, a hook, and a
-   confidence score.
-3. **Render** (`render.py`) — cuts each candidate, reframes to 9:16, and burns
-   in word-chunked captions with the spoken word highlighted, via ffmpeg + libass.
-4. **Assemble** (`assemble.py`) — for campaigns whose assets are too short to
-   reach the brief's minimum length, stitches several source clips into one
-   edit from a JSON edit decision list, adds required on-screen text, and lays
-   a cleared music bed under the source audio.
+---
 
-`main.py` orchestrates stages 1-3. Accepts a local file or a YouTube URL
-(downloaded via `yt-dlp`).
+## What it actually does
+
+```
+source video ──▶ transcript ──▶ moments ──▶ 9:16 clips with burned-in captions
+ (file or       (word-level    (start/end    (1080x1920, H.264, AAC)
+  YouTube URL)   timestamps)    + framing)
+```
+
+The hard part is not the cutting. It is **framing**: a 9:16 crop of a 1920x1080
+source keeps only **608 of 1920 pixels** (31%), which is narrower than any
+two-person shot. A naive centre crop renders perfectly happily and quietly cuts
+the speaker in half. See [Framing](#framing-how-169-becomes-916).
+
+---
+
+## The pipeline
+
+| # | Stage | Script | What it does | Needs a key? |
+|---|---|---|---|---|
+| 0 | Scout | `scout_campaigns.py` | Reads the public Content Rewards board, ranks live campaigns by *how many views you need before you earn anything* | no — public API |
+| 1 | Transcribe | `transcribe.py` | Word-level timestamps via mlx-whisper (Apple Silicon GPU) or faster-whisper (CPU) | no — runs locally |
+| 2 | Select moments | `select_clips.py` | Sends the transcript to Claude, gets back candidate clips | **yes — `ANTHROPIC_API_KEY`** |
+| 2b | Score moments | `pick_moments.py` | Objective scoring for material with **no speech** — audio energy (RMS envelope) weighted against visual motion (mean absolute frame difference) | no |
+| 3 | Render | `render.py` | Cuts, reframes to 9:16, burns in word-highlighted captions | no |
+| 4 | Assemble | `assemble.py` | Stitches several short sources into one edit from an EDL, adds on-screen text and a music bed | no |
+
+`main.py` orchestrates **stages 1→2→3** only. Stages 0, 2b and 4 are run
+directly. Helper scripts (`find_phrase.py`, `make_review.py`) sit alongside them.
+
+### Stage 1 — transcribe
+
+```bash
+python3 transcribe.py <input_media> <out.json> [model_size] [language]
+```
+
+Two backends, chosen automatically: **mlx-whisper** on Apple Silicon (GPU, much
+faster) and **faster-whisper** (CPU int8) everywhere else. The output JSON is
+byte-identical in shape, so no downstream stage knows or cares which ran.
+
+**Always pin the language if you know it.** Whisper's auto-detect drifts across
+closely-related languages — Serbian / Croatian / Bosnian, Danish / Norwegian —
+and a wrong guess poisons every stage after it:
+
+```bash
+python3 transcribe.py input/ep4.mp4 transcripts/ep4.json large-v3 sr
+```
+
+Model size matters more than the docs usually admit: `small` is too weak for
+lower-resource languages like Serbian. `large-v3` is the safe choice.
+
+### Stage 2 — picking moments, two honest paths
+
+`select_clips.py` is the automated path: it sends the transcript to Claude and
+writes a candidates JSON. **It needs `ANTHROPIC_API_KEY`.**
+
+When that key isn't set — or when the material needs a judgement call — the
+agent reads the transcript directly and hand-authors the candidates file. This
+is not a downgrade: for a podcast, reading the transcript and choosing the six
+moments with the strongest hook *is* the job, and a human-in-the-loop pass on
+the boundary timestamps produces better cuts than an API round-trip.
+
+Use `find_phrase.py` to get exact boundaries instead of eyeballing a coarse
+transcript, which lands cuts mid-word:
+
+```bash
+python3 find_phrase.py transcripts/ep4.json "TikTok je učinio svoje" "seci ovo"
+```
+
+It prints the segment containing each phrase plus its neighbours, so you can set
+in/out points on real timestamps.
 
 ### When to use `assemble.py` instead of `render.py`
 
-Use `render.py` for **talking-head material** (podcasts, streams, interviews):
-long sources, spoken content, and clip selection driven by a transcript.
+- **`render.py`** — talking-head material (podcasts, streams, interviews): one
+  long source, spoken content, transcript-driven selection.
+- **`assemble.py`** — gameplay or brand-asset material: many *short* sources
+  (3–10s), often no speech at all, and a brief demanding a minimum length plus
+  mandatory on-screen text. `select_clips.py` is useless here — there is no
+  transcript to reason over, so selection has to be visual.
 
-Use `assemble.py` for **gameplay or brand-asset material**: short source clips
-(3-10s), no speech at all, and a brief that demands a minimum clip length plus
-mandatory on-screen text. `select_clips.py` is useless here — there is no
-transcript to reason over. Selection has to be visual.
+---
+
+## Framing: how 16:9 becomes 9:16
+
+### The arithmetic that decides everything
+
+A 9:16 crop of a 1920x1080 source keeps **608 of 1920 pixels**. That is
+narrower than any two-shot. On a real podcast job the two faces sat **~670px
+apart** — so no crop can hold both, and the only question is *which* 608 you
+take.
+
+### Layouts
+
+| Layout | What it does | Use for |
+|---|---|---|
+| `pad` *(default)* | Whole 16:9 frame scaled to width, centred on a blurred, zoomed copy of itself. Nothing is cropped. | Wide shots, multi-person frames, screen shares, game UI |
+| `crop` | Scales to fill and cuts the sides — **centred** by default | A single centred speaker |
+| `crop` + `focus` | Same, but the window **slides onto a chosen subject** | Any multi-person shot |
+
+### `focus` — the off-centre crop
+
+`focus_x` is where the subject sits in the **source** frame, as a fraction of
+width: `0` = hard left, `0.5` = centre, `1` = hard right.
 
 ```bash
-python3 assemble.py edl.json
+# slide the crop onto a subject instead of centring it
+python3 render.py src.mp4 transcript.json candidates.json out/ --layout crop --focus-x 0.29
 ```
 
-The EDL is plain JSON:
+Better: set it **per clip** in the candidates JSON, which overrides the flag —
+the right value differs from clip to clip.
+
+```json
+{
+  "clips": [
+    { "title": "ship-life", "start": 982.4, "end": 1011.0, "focus_x": 0.37 },
+    { "title": "15-loyal-people", "start": 658.5, "end": 675.6, "focus_x": 0.26 }
+  ]
+}
+```
+
+For a subject who moves, pass keyframes instead of a number and the crop pans
+between them:
+
+```json
+"focus": [{"t": 0, "x": 0.29}, {"t": 12, "x": 0.71}]
+```
+
+### Measuring the number
+
+**Do not eyeball it.** Draw a ruler on the frame and read the position off the
+picture — `drawgrid` at 192px on a 1920px frame is one line per 0.1 of width:
+
+```bash
+ffmpeg -ss 982 -i source.mp4 -frames:v 1 \
+  -vf "drawgrid=w=192:h=1080:t=2:c=red@0.85,scale=1200:-2" grid.png
+```
+
+Then **prove it** — render the same seconds at two or three candidate values and
+look at the result side by side. A value that "should" work is not the same as a
+value you have seen work.
+
+### Classify the camera before choosing a moment
+
+Productions cut unpredictably, so a moment picked from the transcript is not
+automatically crop-friendly. Check the frame at the exact moment before
+committing — speech-driven selection lands on whatever camera happened to be
+live:
+
+| Class | Content | Crop to 9:16? |
+|---|---|---|
+| A | two-shot, two men | yes — pick a focus |
+| B | two-shot, man + woman | yes — pick a focus |
+| C | overhead shot of cards on a table | poor — a narrow slice of table |
+| D | full-screen game board / UI | poor — and it may carry a webcam strip along the top |
+
+### Vertical framing cannot clip anyone
+
+The crop is 1080x1920 taken from a frame scaled to 3413x1920 — full height.
+Nothing can be cut off vertically. A head that looks "cropped at the top" is
+genuinely above the camera's field of view in the source, not a crop bug.
+
+---
+
+## Captions
+
+- Short chunks (≤3 words, ≤22 chars) grouped on **pauses**, so a caption never
+  straddles a silence and drifts out of sync.
+- The **active word is highlighted gold**, the rest stay white — one subtitle
+  event per word, so the highlight tracks speech.
+- Captions sit clear of the bottom edge, out of the way of the TikTok/Reels UI.
+- **Timing is normalised.** Whisper word timings jitter *backwards*, which
+  stacks two captions on the same frames and makes them flicker. A post-pass
+  walks the events in time order and forces each to begin after the previous
+  ended. Do not remove it — verified 0 overlapping events.
+- `WrapStyle: 0` (smart wrap) in **both** `render.py` and `assemble.py`.
+  `WrapStyle: 2` disables wrapping *entirely*, so an over-wide chunk runs off
+  the frame edge and gets clipped instead of breaking onto a second line.
+- **Check your font can draw your language.** A font missing `č ć ž š đ` renders
+  empty boxes, and it fails silently. Arial Black on macOS is verified fine —
+  burn a test `.ass` onto black and read the glyphs back before trusting it.
+
+---
+
+## Human in the loop
+
+By design, and non-negotiable:
+
+- **Credentials belong to the human.** The agent never types a login, and never
+  clicks through a sign-in or a "link your social accounts" screen.
+- **Nothing is published.** No auto-posting to TikTok / Reels / Shorts / YouTube.
+  Platform APIs also make this a bad idea: unaudited TikTok clients can only
+  post `SELF_ONLY`, YouTube uploads from an unverified project land private, and
+  IG Reels needs a Business account plus a linked Facebook Page.
+- **Rendered clips are handed over as files**, plus a `review.html` built by
+  `make_review.py` so a human can actually look at them. Clips that exist only
+  in `output/` are, to the person asking, clips that do not exist.
+- **Royalties matter more than the pipeline.** Only clip footage you own or have
+  been given permission to use. A paid campaign grants that permission through
+  its brief; "it was on YouTube" does not.
+
+---
+
+## Setup
+
+```bash
+# 1. Python env (uv is fastest; a plain venv works too)
+uv venv .venv --python 3.11
+.venv/bin/python -m pip install -r requirements.txt
+
+# 2. Only needed for the automated stage-2 path
+export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+### ffmpeg — this one will bite you
+
+You need an ffmpeg built **with libass**. Homebrew's *plain* `ffmpeg` formula
+ships with **no libass, freetype or drawtext filters at all**, so caption
+burn-in is impossible and ffmpeg fails with an opaque filter error.
+
+```bash
+brew install ffmpeg-full        # keg-only, lands at /opt/homebrew/opt/ffmpeg-full
+```
+
+`render.py` probes every ffmpeg it can find for the `ass` filter and picks the
+first that has it. If none works it names the paths it checked and what to
+install, instead of failing inside ffmpeg.
+
+### `uv` on PATH in non-interactive shells
+
+Background/automation shells do **not** inherit `~/.hermes/bin`, so a bare `uv`
+can fail with `command not found` and abort an install script silently. Either
+call it by absolute path or export PATH first:
+
+```bash
+export PATH="$HOME/.hermes/bin:/opt/homebrew/bin:$PATH"
+```
+
+---
+
+## Usage
+
+```bash
+# Full pipeline on a local file or a YouTube URL (stages 1-3)
+python3 main.py input/your_video.mp4
+python3 main.py "https://youtube.com/watch?v=..." 5 small
+#                                                  ^    ^
+#                                            max_clips  whisper model
+
+# Render a hand-written or LLM-written candidates file
+python3 render.py <source_video> <transcript_json> <candidates_json> <out_dir> \
+                  [--layout pad|crop] [--focus-x 0..1] [--font NAME] [--size N] [--no-captions]
+
+# Multi-clip assembly from an edit decision list
+python3 assemble.py edl.json
+
+# Rank live campaigns before you commit to one
+python3 scout_campaigns.py --gaming --min-platforms 3 --has-assets --fresh-only
+
+# Build a review page for a folder of finished clips
+python3 make_review.py output/<name> --title "Episode 4"
+```
+
+The `assemble.py` EDL is plain JSON:
 
 ```json
 {
@@ -60,102 +293,54 @@ The EDL is plain JSON:
 ```
 
 Overlay styles: `title` (top, largest), `sub` (top, gold, beneath the title),
-`cta` (bottom, inside the safe zone). Segment times are absolute seconds into
-each source file; overlay times are relative to the assembled timeline. Source
-audio is kept at `game_audio_volume` and mixed under the music bed.
+`cta` (bottom, inside the safe zone), `hook` (top, pop-in scale then fade).
+Segment times are absolute seconds into each source file; overlay times are
+relative to the assembled timeline. Source audio is kept at
+`game_audio_volume` and mixed under the music bed.
 
-## Setup
-
-```bash
-pip install -r requirements.txt
-export ANTHROPIC_API_KEY=sk-ant-...
-```
-
-### ffmpeg — this one will bite you
-
-You need an ffmpeg built **with libass**. Homebrew's *plain* `ffmpeg` formula
-ships with **no libass, freetype or drawtext filters at all**, so caption
-burn-in is impossible with it and ffmpeg fails with an opaque filter error.
-
-```bash
-brew install ffmpeg-full        # keg-only, lands at /opt/homebrew/opt/ffmpeg-full
-```
-
-`render.py` probes every ffmpeg it can find for the `ass` filter and picks the
-first one that has it, so the full build is found automatically. If none works
-it tells you which paths it checked and what to install, instead of failing
-inside ffmpeg.
-
-## Usage
-
-```bash
-python3 main.py input/your_video.mp4
-python3 main.py "https://youtube.com/watch?v=..." 5 small
-#                                                  ^    ^
-#                                            max_clips  whisper model size
-```
-
-Render a single set of candidates directly:
-
-```bash
-python3 render.py <source_video> <transcript_json> <candidates_json> <out_dir> \
-                  [--layout pad|crop] [--no-captions]
-```
-
-### Layouts
-
-| Layout | What it does | Use for |
-|---|---|---|
-| `pad` *(default)* | Whole 16:9 frame scaled to width, centred on a blurred, zoomed copy of itself. Nothing is cropped. | Wide shots, multi-person frames, screen shares |
-| `crop` | Scales to fill the frame and cuts the sides. | A single centred speaker |
-
-`crop` was the only option before, and it cuts people off in wide or
-multi-person shots. `pad` is now the default because it never loses anyone.
+---
 
 ## Output
 
-`output/<video_name>/`, one `.mp4` per clip plus the `.ass` subtitle file that
-produced its captions.
+`output/<video_name>/` — one `.mp4` per clip, the `.ass` subtitle file that
+produced its captions, and a `review.html` if `make_review.py` has been run.
 
-## Captions
-
-- Short chunks (≤3 words, ≤22 chars) grouped on **pauses**, so a caption never
-  straddles a silence and drifts out of sync.
-- The **active word is highlighted gold**, the rest stay white — one subtitle
-  event per word, so the highlight tracks speech.
-- Captions sit **380px clear of the bottom** edge, out of the way of the
-  TikTok/Reels UI and their caption overlay.
-- **Timing is normalised.** Whisper word timings jitter *backwards*, which
-  stacks two captions on the same frames and makes them flicker. A post-pass
-  walks the events in time order and forces each to begin after the previous
-  ended. Do not remove it — verified 0 overlapping events.
-
-## Known limitations
-
-- `crop` is still a dumb centre-crop — no active-speaker tracking. Use `pad`
-  when the frame has more than one person in it.
-- No audio-based moment detection (laughter, energy spikes) — clip selection is
-  purely transcript-driven. **This is wrong for gameplay footage**, where the
-  payoff is visual rather than spoken; gaming clips need audio-energy and
-  scene-change signals, not just speech.
-- Clip boundaries are only as good as the LLM's segment alignment; not
-  frame-perfect.
-- No auto-posting — clips are rendered to disk, not published anywhere.
+---
 
 ## Repo layout
 
 ```
-transcribe.py       # stage 1 — mlx-whisper / faster-whisper
-select_clips.py     # stage 2 — Claude picks candidates (talking-head only)
-render.py           # stage 3 — single-source reframe + burn captions
+scout_campaigns.py  # stage 0 — rank live campaigns by the view gate
+transcribe.py       # stage 1 — mlx-whisper / faster-whisper, word timestamps
+select_clips.py     # stage 2 — Claude picks candidates (needs ANTHROPIC_API_KEY)
+pick_moments.py     # stage 2b — objective scoring for speechless material
+render.py           # stage 3 — single-source reframe + focus crop + captions
 assemble.py         # stage 4 — multi-clip edit from an EDL + on-screen text
 main.py             # orchestrator (stages 1-3)
+find_phrase.py      # helper — exact timestamp of a phrase, for clean cuts
+make_review.py      # helper — review.html for a folder of clips
 docs/               # operational notes and campaign research
 input/              # source videos (gitignored)
 transcripts/        # whisper output JSON (gitignored)
-clips/              # LLM clip-candidate JSON (gitignored)
+clips/              # clip-candidate JSON (gitignored)
 output/             # rendered clips (gitignored)
 ```
+
+---
+
+## Known limitations
+
+- **No active-speaker tracking.** `focus` is set per clip, by hand, from a frame
+  you have looked at. It does not follow a conversation automatically — if two
+  people trade lines, switch that clip to `pad`.
+- **No audio-based moment detection** (laughter, energy spikes) in
+  `render.py` — clip selection is transcript-driven. `pick_moments.py` covers
+  speechless material, but the two are not yet combined into one selector.
+- **Clip boundaries are only as good as the transcript.** ASR errors land in the
+  captions. Serbian in particular comes back with real misses (`SVEĆAM` for
+  `SEĆAM`, `SECI` for `SEĆI`). Read the rendered captions before shipping, and
+  prefer a correction pass over silently trusting the transcript.
+- **No auto-posting**, by design — see [Human in the loop](#human-in-the-loop).
 
 ## Pitfalls worth knowing
 
@@ -164,12 +349,20 @@ output/             # rendered clips (gitignored)
 - **Filtergraph chains must be joined with `;`.** Concatenating them with an
   empty string makes ffmpeg read the next input pad as a second input to the
   previous filter, and it fails with a bare `Invalid argument`.
+- **ffmpeg expressions inside filter args need their commas escaped.** A
+  `max(0,min(...))` in a `crop` x-position will otherwise be read as two
+  arguments. `_focus_expr` escapes them.
 - **`ass=` needs a path that doesn't require escaping.** Write the `.ass` into a
   scratch directory and run ffmpeg with that as its cwd.
-- **`WrapStyle: 2` disables word wrapping — long overlay text gets CLIPPED, not
-  wrapped.** Short labels like `WISHLIST ON STEAM` fit, so this hides until
-  someone adds a 22-character hook. `assemble.py` uses `WrapStyle: 0` (smart
-  wrap). Check every new overlay string at the frame edges, not just in the
-  `.ass` file.
+- **`WrapStyle: 2` disables word wrapping — long text gets CLIPPED, not
+  wrapped.** Short labels fit, so it hides until someone adds a long one. Both
+  renderers now use `WrapStyle: 0`. Check every new string at the frame edges.
+- **Heavy CPU work starves GPU transcription.** Rendering while mlx-whisper runs
+  dropped it from ~250 to ~77 mel-frames/s. Transcribe first, render after.
 - **A campaign may pay nothing below a minimum-payout threshold.** Read
-  `minPayoutCents`, not just the headline CPM — see `docs/whop-content-rewards.md`.
+  `minPayoutCents`, not just the headline CPM — see
+  `docs/whop-content-rewards.md`.
+- **Rank campaigns by the view gate, not the CPM.** `minPayout ÷ rate × 1000` is
+  the views one clip needs before it earns a cent. A high CPM with a high gate
+  pays worse than a lower CPM you can actually clear. The *cap* matters too: it
+  decides the views at which a hit stops earning.
