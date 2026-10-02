@@ -1,3 +1,9 @@
-faster-whisper
-yt-dlp
-anthropic
+# Core pipeline
+faster-whisper      # CPU fallback backend (portable — Linux / Windows / Intel)
+yt-dlp              # source download in main.py
+anthropic           # clip selection in select_clips.py
+
+# Apple Silicon only: much faster GPU transcription.
+# transcribe.py prefers this automatically when running on an M-series Mac.
+#   pip install mlx-whisper
+mlx-whisper; sys_platform == "darwin" and platform_machine == "arm64"
