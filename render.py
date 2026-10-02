@@ -133,7 +133,11 @@ def build_ass(words, clip_start, clip_end, font, size, outline, upper=True):
         "ScriptType: v4.00+",
         f"PlayResX: {W}",
         f"PlayResY: {H}",
-        "WrapStyle: 2",
+        # WrapStyle 0 = smart wrapping. WrapStyle 2 disables wrapping ENTIRELY,
+        # so a long chunk runs off the frame edge and gets clipped instead of
+        # breaking onto a second line. Serbian words are long and the captions
+        # are uppercased, so this is not hypothetical.
+        "WrapStyle: 0",
         "ScaledBorderAndShadow: yes",
         "",
         "[V4+ Styles]",
