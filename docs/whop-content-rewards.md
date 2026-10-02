@@ -33,6 +33,42 @@ announces each campaign as it goes live.
 - **Submit the post link within 30 minutes of posting.** Treat this as a hard
   deadline; the queue has to carry caption, link and media ready to go.
 
+### The minimum-payout gate — read this before producing anything
+
+`minPayoutCents` in the campaign API is **not** a withdrawal minimum. It is the
+threshold below which a submission earns *nothing*. Read it before the headline
+rate, because it sets the real view target:
+
+```
+views_before_a_clip_earns_anything = minPayout / rate * 1000
+```
+
+Worked example, a real live campaign (MotionVolt Games "Flip Master"):
+
+| Field | Value |
+|---|---|
+| `rateCents` | 150 → **$1.50 / 1K** |
+| description text | claimed **$1.25 / 1K** — disagreed with the config |
+| `minPayoutCents` | 1000 → **$10**, i.e. **6,667 views before earning anything** |
+| `maxPayoutCents` | 7500 → $75, i.e. stops earning at **50,000 views** |
+| `platforms` | tiktok, instagram, youtube — all three, same rate |
+| `budgetCents` | 100000 → the whole $1,000 pool drains in ~13 maxed clips on one
+  platform, or ~4.4 maxed across all three |
+
+Lessons that generalise:
+
+- The headline CPM is close to meaningless on its own. A "$1.50 CPM" campaign
+  demanding 6,667 views to pay out is a harder ask than a "$0.60 CPM" campaign
+  with no minimum.
+- Multi-platform campaigns let **one edit earn on every allowed platform**. When
+  the brief permits it, post the same cut everywhere.
+- Read the campaign's own description against the API config. They can disagree
+  (as above), and the description is what a clipper reads before committing.
+- A brand-new, unverified org with an untouched budget is the best first-mover
+  position, but also the least proven. Screenshot everything.
+- **Flip Master assets are 3.1–10.2s each, so no single asset can satisfy a
+  10–30s brief.** Use `assemble.py`; the edit must be stitched.
+
 ## The economics, without the hype
 
 - **Gaming and streamer clips are the cheapest niche on the board**: streamers

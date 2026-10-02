@@ -14,9 +14,52 @@ short-form clips — automatically.
    confidence score.
 3. **Render** (`render.py`) — cuts each candidate, reframes to 9:16, and burns
    in word-chunked captions with the spoken word highlighted, via ffmpeg + libass.
+4. **Assemble** (`assemble.py`) — for campaigns whose assets are too short to
+   reach the brief's minimum length, stitches several source clips into one
+   edit from a JSON edit decision list, adds required on-screen text, and lays
+   a cleared music bed under the source audio.
 
-`main.py` orchestrates all three. Accepts a local file or a YouTube URL
+`main.py` orchestrates stages 1-3. Accepts a local file or a YouTube URL
 (downloaded via `yt-dlp`).
+
+### When to use `assemble.py` instead of `render.py`
+
+Use `render.py` for **talking-head material** (podcasts, streams, interviews):
+long sources, spoken content, and clip selection driven by a transcript.
+
+Use `assemble.py` for **gameplay or brand-asset material**: short source clips
+(3-10s), no speech at all, and a brief that demands a minimum clip length plus
+mandatory on-screen text. `select_clips.py` is useless here — there is no
+transcript to reason over. Selection has to be visual.
+
+```bash
+python3 assemble.py edl.json
+```
+
+The EDL is plain JSON:
+
+```json
+{
+  "out": "output/brand/01_hook.mp4",
+  "layout": "crop",
+  "music": "input/brand/cleared_music.wav",
+  "game_audio_volume": 0.32,
+  "segments": [
+    { "file": "input/brand/clip_a.mp4", "start": 0.4, "end": 1.9 },
+    { "file": "input/brand/clip_b.mp4", "start": 0.6, "end": 2.6 }
+  ],
+  "overlays": [
+    { "text": "GAME NAME",         "start": 0.2, "end": 12.0, "style": "title" },
+    { "text": "EARLY ACCESS",      "start": 0.2, "end": 12.0, "style": "sub" },
+    { "text": "WISHLIST ON STEAM", "start": 1.2, "end": 12.0, "style": "cta" }
+  ]
+}
+```
+
+Overlay styles: `title` (top, largest), `sub` (top, gold, beneath the title),
+`cta` (bottom, inside the safe zone). Segment times are absolute seconds into
+each source file; overlay times are relative to the assembled timeline. Source
+audio is kept at `game_audio_volume` and mixed under the music bed.
 
 ## Setup
 
@@ -100,12 +143,25 @@ produced its captions.
 
 ```
 transcribe.py       # stage 1 — mlx-whisper / faster-whisper
-select_clips.py     # stage 2 — Claude picks candidates
-render.py           # stage 3 — reframe + burn captions
-main.py             # orchestrator
+select_clips.py     # stage 2 — Claude picks candidates (talking-head only)
+render.py           # stage 3 — single-source reframe + burn captions
+assemble.py         # stage 4 — multi-clip edit from an EDL + on-screen text
+main.py             # orchestrator (stages 1-3)
 docs/               # operational notes and campaign research
 input/              # source videos (gitignored)
 transcripts/        # whisper output JSON (gitignored)
 clips/              # LLM clip-candidate JSON (gitignored)
 output/             # rendered clips (gitignored)
 ```
+
+## Pitfalls worth knowing
+
+- **Whisper word timings jitter backwards.** Captions stack on the same frames
+  and flicker unless normalised. Both `render.py` and `assemble.py` handle it.
+- **Filtergraph chains must be joined with `;`.** Concatenating them with an
+  empty string makes ffmpeg read the next input pad as a second input to the
+  previous filter, and it fails with a bare `Invalid argument`.
+- **`ass=` needs a path that doesn't require escaping.** Write the `.ass` into a
+  scratch directory and run ffmpeg with that as its cwd.
+- **A campaign may pay nothing below a minimum-payout threshold.** Read
+  `minPayoutCents`, not just the headline CPM — see `docs/whop-content-rewards.md`.
