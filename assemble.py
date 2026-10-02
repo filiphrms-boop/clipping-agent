@@ -78,9 +78,13 @@ def build_overlays(overlays, font):
     if not overlays:
         return None
     # [name, alignment, fontsize, MarginV, outline, colour]
+    # alignment 8 = top centre, 5 = middle centre, 2 = bottom centre
     styles = {
         "title": ("Title", 8, 92, SAFE_TOP, 8, WHITE),
         "sub":   ("Sub",   8, 54, SAFE_TOP + 128, 6, GOLD),
+        # 84pt overflowed the 1080px frame on a 22-char hook. 66 with smart
+        # wrapping (WrapStyle 0) wraps instead of clipping.
+        "hook":  ("Hook",  5, 66, 210, 8, WHITE),
         "cta":   ("Cta",   2, 64, SAFE_BOTTOM, 7, WHITE),
     }
     lines = [
@@ -88,7 +92,7 @@ def build_overlays(overlays, font):
         "ScriptType: v4.00+",
         f"PlayResX: {W}",
         f"PlayResY: {H}",
-        "WrapStyle: 2",
+        "WrapStyle: 0",
         "ScaledBorderAndShadow: yes",
         "",
         "[V4+ Styles]",
@@ -111,6 +115,10 @@ def build_overlays(overlays, font):
             raise SystemExit(f"unknown overlay style {style!r}; use {list(styles)}")
         name = styles[style][0]
         text = ov["text"].replace("\n", r"\N")
+        # The hook pops in and fades out, so it lands as a deliberate beat in
+        # the first two seconds rather than reading as another static caption.
+        if style == "hook":
+            text = r"{\fad(70,200)\fscx62\fscy62\t(0,150,\fscx100\fscy100)}" + text
         lines.append(f"Dialogue: 0,{ts(ov['start'])},{ts(ov['end'])},{name},,"
                      f"0,0,0,,{text}")
     return "\n".join(lines) + "\n"

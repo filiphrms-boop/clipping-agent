@@ -166,5 +166,10 @@ output/             # rendered clips (gitignored)
   previous filter, and it fails with a bare `Invalid argument`.
 - **`ass=` needs a path that doesn't require escaping.** Write the `.ass` into a
   scratch directory and run ffmpeg with that as its cwd.
+- **`WrapStyle: 2` disables word wrapping — long overlay text gets CLIPPED, not
+  wrapped.** Short labels like `WISHLIST ON STEAM` fit, so this hides until
+  someone adds a 22-character hook. `assemble.py` uses `WrapStyle: 0` (smart
+  wrap). Check every new overlay string at the frame edges, not just in the
+  `.ass` file.
 - **A campaign may pay nothing below a minimum-payout threshold.** Read
   `minPayoutCents`, not just the headline CPM — see `docs/whop-content-rewards.md`.
