@@ -25,11 +25,21 @@ EDL shape:
      {"text": "EARLY ACCESS ON STEAM","start": 0.8, "end": 8.0, "style": "sub"},
      {"text": "WISHLIST ON STEAM",   "start": 2.0, "end": 9.0, "style": "cta"}
   ],
+  "sfx": [
+     {"role": "impact", "at": 0.05, "gain": -3},
+     {"role": "whoosh", "at": 3.20, "gain": -8},
+     {"role": "whoosh", "at": 6.10, "gain": -8}
+  ],
   "font": "Arial Black"
 }
 
-Segment timings are absolute seconds inside each source file. Overlay timings
-are relative to the assembled timeline.
+Segment timings are absolute seconds inside each source file. Overlay and SFX
+timings are relative to the assembled timeline.
+
+`sfx` is optional. Cues name a ROLE ("impact", "whoosh", "fail", "win") and are
+resolved against assets/sfx/manifest.json; repeated roles rotate through
+different files, deterministically. See sfx.py for the full cue shape and
+`python3 fetch_sfx.py sync` for how the pack gets on disk at all.
 """
 import json
 import os
@@ -39,6 +49,9 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+
+from sfx import (SfxLibrary, SfxError, build_chains, build_sfx_mix,
+                 normalise_cues)
 
 W, H = 1080, 1920
 SAFE_BOTTOM = 380
@@ -191,13 +204,44 @@ def main(edl_path):
         chains.append(f"[{music_idx}:a]atrim=start={edl.get('music_start', 0.0):.3f},"
                       f"asetpts=PTS-STARTPTS,volume={edl.get('music_volume', 1.0)}[mus]")
         chains.append(f"[gamea][mus]amix=inputs=2:duration=longest:dropout_transition=0,"
-                      f"atrim=0:{total:.3f},"
-                      f"afade=t=out:st={max(0.0, total - 0.6):.3f}:d=0.6[aout]")
+                      f"atrim=0:{total:.3f}[bed]")
+        fade = f"afade=t=out:st={max(0.0, total - 0.6):.3f}:d=0.6"
     else:
         chains.append(f"{''.join(game)}concat=n={len(segments)}:v=0:a=1,"
-                      f"atrim=0:{total:.3f}[aout]")
+                      f"atrim=0:{total:.3f}[bed]")
+        fade = None
 
-    amap = "[aout]"
+    # --- sound effects (optional) -------------------------------------- #
+    # Cues are summed into the bed rather than mixed *with* it, so adding an
+    # effect never attenuates the music (see sfx.py — amix normalises by
+    # default, which would duck the bed on every whoosh).
+    sfx_cues = edl.get("sfx") or []
+    tail = "[bed]"
+    if sfx_cues:
+        lib = SfxLibrary()
+        resolved = normalise_cues(sfx_cues, lib, total)
+        first = len(segments) + (1 if music_idx is not None else 0)
+        sfx_inputs, sfx_chains, sfx_labels = build_chains(resolved, first)
+        cmd += [a for path in sfx_inputs for a in ("-i", path)]
+        chains += sfx_chains
+        chains.append(build_sfx_mix(resolved, sfx_chains, sfx_labels))
+        chains.append(f"[bed][sfxall]amix=inputs=2:duration=first:"
+                      f"dropout_transition=0:normalize=0[premix]")
+        tail = "[premix]"
+        print(f"[assemble] {len(resolved)} SFX cue(s): "
+              + ", ".join(f"{c['stem'].split('-', 1)[-1]}@{c['at']:.2f}s"
+                          f"/{c['gain']:+.0f}dB" for c in resolved))
+
+    # The whole mix is faded (and, when cues are present, limited) AFTER the
+    # effects land — an impact on the last beat should stay an impact.
+    post = [f for f in (fade, "alimiter=limit=0.97:level=0:latency=1" if sfx_cues else None)
+            if f]
+    if post:
+        chains.append(f"{tail}{','.join(post)}[aout]")
+        amap = "[aout]"
+    else:
+        amap = tail
+
     chain = ";".join(chains)
 
     cmd += [
@@ -229,4 +273,9 @@ if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("usage: python3 assemble.py <edl.json>")
         sys.exit(1)
-    main(sys.argv[1])
+    try:
+        main(sys.argv[1])
+    except SfxError as e:
+        # a bad cue is an authoring mistake, not a crash — say which cue
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(2)

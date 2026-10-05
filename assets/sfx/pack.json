@@ -1,0 +1,29 @@
+{
+  "_comment": "Curated Mixkit SFX for the 9:16 edit grammar. Pick by ROLE, not by title — see fetch_sfx.py docstring. Run `python3 fetch_sfx.py sync` to materialise the audio and regenerate manifest.json. Ids are Mixkit sound ids; `name` is optional display text used in the filename.",
+  "notes": "Starter pack: impacts land the opening beat, whooshes carry segment-to-segment transitions, fail/win bookend comedy and payoff moments. Keep files short — anything over ~3s fights a 15-25s cut.",
+  "roles": {
+    "impact": [
+      { "id": 772,  "name": "Quick zoom impact" },
+      { "id": 2150, "name": "Impact of a blow" },
+      { "id": 2182, "name": "Wood hard hit" },
+      { "id": 2902, "name": "Movie impact intro presentation" }
+    ],
+    "whoosh": [
+      { "id": 1490, "name": "Fast whoosh transition" },
+      { "id": 1492, "name": "Cinematic whoosh fast transition" },
+      { "id": 1485, "name": "Metal hit woosh" },
+      { "id": 1493, "name": "Swirling whoosh" }
+    ],
+    "fail": [
+      { "id": 472,  "name": "Slow sad trombone fail" },
+      { "id": 568,  "name": "Fail drum and xylophone" },
+      { "id": 2876, "name": "Funny fail low tone" },
+      { "id": 946,  "name": "Wrong answer fail notification" }
+    ],
+    "win": [
+      { "id": 2016, "name": "Video game win" },
+      { "id": 2015, "name": "Winning chimes" },
+      { "id": 2059, "name": "Game level completed" }
+    ]
+  }
+}

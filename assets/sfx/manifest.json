@@ -1,0 +1,202 @@
+{
+  "source": "Mixkit Free Sound Effects",
+  "source_url": "https://mixkit.co/free-sound-effects/",
+  "license": "Mixkit Free Sound Effects License",
+  "license_url": "https://mixkit.co/license/",
+  "license_note": "Royalty-free. No attribution required. Commercial and personal use permitted. Verify at license_url before shipping for a paying client.",
+  "asset_pattern": "https://assets.mixkit.co/active_storage/sfx/{id}/{id}.wav",
+  "generated": "2026-10-05T12:16:26+0200",
+  "notes": "Starter pack: impacts land the opening beat, whooshes carry segment-to-segment transitions, fail/win bookend comedy and payoff moments. Keep files short \u2014 anything over ~3s fights a 15-25s cut.",
+  "roles": {
+    "impact": [
+      "772-quick-zoom-impact",
+      "2150-impact-of-a-blow",
+      "2182-wood-hard-hit",
+      "2902-movie-impact-intro-presentation"
+    ],
+    "whoosh": [
+      "1490-fast-whoosh-transition",
+      "1492-cinematic-whoosh-fast-transition",
+      "1485-metal-hit-woosh",
+      "1493-swirling-whoosh"
+    ],
+    "fail": [
+      "472-slow-sad-trombone-fail",
+      "568-fail-drum-and-xylophone",
+      "2876-funny-fail-low-tone",
+      "946-wrong-answer-fail-notification"
+    ],
+    "win": [
+      "2016-video-game-win",
+      "2015-winning-chimes",
+      "2059-game-level-completed"
+    ]
+  },
+  "files": {
+    "772-quick-zoom-impact": {
+      "id": 772,
+      "title": "Quick zoom impact",
+      "duration": 1.222,
+      "sample_rate": 44100,
+      "channels": 2,
+      "bit_depth": 16,
+      "frames": 53873,
+      "bytes": 215536,
+      "sha256": "a9acddce67b0ad80e44674964ac2cdcd91810593049f49d2afea508c8f15add1"
+    },
+    "2150-impact-of-a-blow": {
+      "id": 2150,
+      "title": "Impact of a blow",
+      "duration": 0.591,
+      "sample_rate": 44100,
+      "channels": 2,
+      "bit_depth": 24,
+      "frames": 26063,
+      "bytes": 156458,
+      "sha256": "a9562dd43120b8402060a7f6b51fe30ae1982a30a7b4f02cc479e2c34009aaa7"
+    },
+    "2182-wood-hard-hit": {
+      "id": 2182,
+      "title": "Wood hard hit",
+      "duration": 0.417,
+      "sample_rate": 44100,
+      "channels": 2,
+      "bit_depth": 16,
+      "frames": 18375,
+      "bytes": 75234,
+      "sha256": "3076e618e5402652e2d978ec6285d990f8529fda52f59e451464104fe7f96dd4"
+    },
+    "2902-movie-impact-intro-presentation": {
+      "id": 2902,
+      "title": "Movie impact intro presentation",
+      "duration": 5.994,
+      "sample_rate": 44100,
+      "channels": 2,
+      "bit_depth": 16,
+      "frames": 264319,
+      "bytes": 1057320,
+      "sha256": "fa492598b602668dc8bf34e992c425a5e560fff6dbb9b718e48b3032de1f170b"
+    },
+    "1490-fast-whoosh-transition": {
+      "id": 1490,
+      "title": "Fast whoosh transition",
+      "duration": 1.757,
+      "sample_rate": 44100,
+      "channels": 2,
+      "bit_depth": 16,
+      "frames": 77471,
+      "bytes": 309928,
+      "sha256": "2f914dcec1276107b888557e2e33043396cff10adad9e7b6f6adf93cc011c08b"
+    },
+    "1492-cinematic-whoosh-fast-transition": {
+      "id": 1492,
+      "title": "Cinematic whoosh fast transition",
+      "duration": 1.334,
+      "sample_rate": 44100,
+      "channels": 2,
+      "bit_depth": 16,
+      "frames": 58835,
+      "bytes": 235384,
+      "sha256": "02b8cd40b3761288d54f4d6706983a2f8c110182b669ae2cdf9aab02935a4e7a"
+    },
+    "1485-metal-hit-woosh": {
+      "id": 1485,
+      "title": "Metal hit woosh",
+      "duration": 0.479,
+      "sample_rate": 44100,
+      "channels": 2,
+      "bit_depth": 24,
+      "frames": 21141,
+      "bytes": 126926,
+      "sha256": "706a25a0fba25d317071a441c1e09737aef64b4ac2618f59197d4ca735e6302f"
+    },
+    "1493-swirling-whoosh": {
+      "id": 1493,
+      "title": "Swirling whoosh",
+      "duration": 2.485,
+      "sample_rate": 44100,
+      "channels": 2,
+      "bit_depth": 16,
+      "frames": 109601,
+      "bytes": 438448,
+      "sha256": "b90a422ac769d50a00f9f12641deb5769fbca1a6eed4773a3a04d6163f0c97a0"
+    },
+    "472-slow-sad-trombone-fail": {
+      "id": 472,
+      "title": "Slow sad trombone fail",
+      "duration": 6.018,
+      "sample_rate": 44100,
+      "channels": 2,
+      "bit_depth": 16,
+      "frames": 265379,
+      "bytes": 1061560,
+      "sha256": "821a5a56e2e93fd719645b41fc6707f91329f90b703ec62c592229aa34e2e0c4"
+    },
+    "568-fail-drum-and-xylophone": {
+      "id": 568,
+      "title": "Fail drum and xylophone",
+      "duration": 3.496,
+      "sample_rate": 44100,
+      "channels": 2,
+      "bit_depth": 16,
+      "frames": 154195,
+      "bytes": 616962,
+      "sha256": "91e46f2cbee104c546fce9762021d98074f2302c5b2dd45124c428b9f371151e"
+    },
+    "2876-funny-fail-low-tone": {
+      "id": 2876,
+      "title": "Funny fail low tone",
+      "duration": 1.515,
+      "sample_rate": 44100,
+      "channels": 2,
+      "bit_depth": 16,
+      "frames": 66821,
+      "bytes": 267466,
+      "sha256": "024ee4e2b732ba977bdd75ca5cad9a40af757e31b0c397cd84367e702761c140"
+    },
+    "946-wrong-answer-fail-notification": {
+      "id": 946,
+      "title": "Wrong answer fail notification",
+      "duration": 1.95,
+      "sample_rate": 44100,
+      "channels": 2,
+      "bit_depth": 16,
+      "frames": 85989,
+      "bytes": 344000,
+      "sha256": "830b2019b21f9532d1cf2bf3ebb93919c24d92b92a2aa22d231393a4b8ffb472"
+    },
+    "2016-video-game-win": {
+      "id": 2016,
+      "title": "Video game win",
+      "duration": 2.527,
+      "sample_rate": 44100,
+      "channels": 2,
+      "bit_depth": 16,
+      "frames": 111436,
+      "bytes": 445788,
+      "sha256": "39fdc4f8ae53ae6d1095106d542a5ca43f78db1ebe05e47c23546d11bf7a5b4a"
+    },
+    "2015-winning-chimes": {
+      "id": 2015,
+      "title": "Winning chimes",
+      "duration": 2.643,
+      "sample_rate": 44100,
+      "channels": 2,
+      "bit_depth": 16,
+      "frames": 116537,
+      "bytes": 466330,
+      "sha256": "ab4de95e557af35a0faf6597e9dfc873bbae6840397bc8f8b0ba6eb96602a82e"
+    },
+    "2059-game-level-completed": {
+      "id": 2059,
+      "title": "Game level completed",
+      "duration": 3.542,
+      "sample_rate": 44100,
+      "channels": 2,
+      "bit_depth": 16,
+      "frames": 156213,
+      "bytes": 624896,
+      "sha256": "8da83b49ceb580493ba7c7081ec3d176fe069d4505474b604f6fb08b339bd32a"
+    }
+  }
+}

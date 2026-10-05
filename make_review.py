@@ -2,13 +2,19 @@
 """Build a review.html for a folder of rendered clips.
 
 Usage:
-    python3 make_review.py <clips_dir> [--title "Sajd Kvest #4"]
+    python3 make_review.py <clips_dir> [--title "Sajd Kvest #4"] [--audible]
 
-Writes <clips_dir>/review.html: every .mp4 in the folder as a muted,
-autoplaying, looping player with its duration / resolution / size, plus an
-optional notes table. This is the "you can actually SEE them" step — clips
-that exist only in ~/output are, to the person asking, clips that do not
-exist. Relative src paths keep it working offline from file://.
+Writes <clips_dir>/review.html: every .mp4 in the folder as a player, with its
+duration / resolution / size, plus an optional notes table. This is the "you can
+actually SEE them" step — clips that exist only in ~/output are, to the person
+asking, clips that do not exist. Relative src paths keep it working offline from
+file://.
+
+Players are muted + autoplaying + looping, which is what you want for checking
+framing, captions and on-screen text. Pass --audible for a sound-effects review:
+that swaps in real controls so the cues can actually be heard. (Autoplay is
+dropped in that mode — browsers block autoplay with sound, so keeping it would
+just show a frozen first frame.)
 """
 import json
 import subprocess
@@ -60,10 +66,20 @@ def human(n):
     return f"{n:.1f} TB"
 
 
-def build(clips_dir, title):
+def build(clips_dir, title, audible=False):
     clips_dir = Path(clips_dir)
     videos = sorted(p for p in clips_dir.glob("*.mp4") if not p.name.startswith("."))
     ffprobe = find_ffprobe()
+
+    # A sound-effects review has to be HEARD. `muted autoplay` is right for
+    # reviewing framing and captions, and useless for checking whether a whoosh
+    # lands on the cut — so --audible swaps in controls and drops autoplay
+    # (browsers refuse to autoplay with sound anyway, so autoplay there would
+    # just render a frozen first frame).
+    if audible:
+        player = "controls playsinline preload=\"metadata\""
+    else:
+        player = "muted autoplay loop playsinline"
 
     cards, rows = [], []
     for p in videos:
@@ -72,7 +88,7 @@ def build(clips_dir, title):
         meta = " · ".join(x for x in [f"{dur:.1f}s" if dur else None, wh, size] if x)
         cards.append(f"""
     <figure>
-      <video src="{p.name}" muted autoplay loop playsinline></video>
+      <video src="{p.name}" {player}></video>
       <figcaption><b>{p.name}</b><br><span class="meta">{meta}</span></figcaption>
     </figure>""")
         rows.append(f"      <tr><td>{p.name}</td><td>{meta}</td></tr>")
@@ -126,4 +142,4 @@ if __name__ == "__main__":
     ttl = "Clip review"
     if "--title" in sys.argv:
         ttl = sys.argv[sys.argv.index("--title") + 1]
-    build(args[0], ttl)
+    build(args[0], ttl, audible="--audible" in sys.argv)

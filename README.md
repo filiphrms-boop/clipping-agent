@@ -34,6 +34,7 @@ the speaker in half. See [Framing](#framing-how-169-becomes-916).
 | 2b | Score moments | `pick_moments.py` | Objective scoring for material with **no speech** — audio energy (RMS envelope) weighted against visual motion (mean absolute frame difference) | no |
 | 3 | Render | `render.py` | Cuts, reframes to 9:16, burns in word-highlighted captions | no |
 | 4 | Assemble | `assemble.py` | Stitches several short sources into one edit from an EDL, adds on-screen text and a music bed | no |
+| 4b | Sound effects | `fetch_sfx.py` + `sfx.py` | Royalty-free SFX pack, and the cue layer that places effects on the assembled timeline | no |
 
 `main.py` orchestrates **stages 1→2→3** only. Stages 0, 2b and 4 are run
 directly. Helper scripts (`find_phrase.py`, `make_review.py`) sit alongside them.
@@ -288,15 +289,124 @@ The `assemble.py` EDL is plain JSON:
     { "text": "GAME NAME",         "start": 0.2, "end": 12.0, "style": "title" },
     { "text": "EARLY ACCESS",      "start": 0.2, "end": 12.0, "style": "sub" },
     { "text": "WISHLIST ON STEAM", "start": 1.2, "end": 12.0, "style": "cta" }
+  ],
+  "sfx": [
+    { "role": "impact", "at": 0.05, "gain": -4 },
+    { "role": "whoosh", "at": 1.45, "gain": -7 }
   ]
 }
 ```
 
 Overlay styles: `title` (top, largest), `sub` (top, gold, beneath the title),
 `cta` (bottom, inside the safe zone), `hook` (top, pop-in scale then fade).
-Segment times are absolute seconds into each source file; overlay times are
-relative to the assembled timeline. Source audio is kept at
+Segment times are absolute seconds into each source file; overlay **and SFX**
+times are relative to the assembled timeline. Source audio is kept at
 `game_audio_volume` and mixed under the music bed.
+
+---
+
+## Sound effects
+
+`sfx` is optional and additive — an EDL without it renders exactly as it did
+before the feature existed (verified below).
+
+```bash
+python3 fetch_sfx.py sync         # download the pack into assets/sfx/
+python3 sfx.py list               # what's in it, by role
+python3 sfx.py list whoosh
+python3 sfx.py check edl.json output/x.mp4 --control output/x_nosfx.mp4
+```
+
+### The pack
+
+Cues name a **role**, never a path:
+
+| Role | Use for |
+|---|---|
+| `impact` | the opening beat, a cut onto a hit |
+| `whoosh` | carrying a segment-to-segment transition |
+| `fail` | comedic failure — a crash, a missed flip |
+| `win` | payoff, achievement, a clean landing |
+
+`assets/sfx/pack.json` is the curated list (edit this, not the wavs);
+`fetch_sfx.py sync` downloads the audio and writes `manifest.json` with real
+per-file metadata — duration, channels, bit depth, size and sha256. `sfx.py`
+resolves roles against that manifest, so re-curating the pack never touches an
+EDL. `python3 fetch_sfx.py verify` re-checks the pack against its hashes.
+
+Audio comes from **Mixkit** (<https://mixkit.co/free-sound-effects/>), under the
+Mixkit Free Sound Effects License: royalty-free, no attribution required,
+commercial use permitted. Mixkit serves each effect as a full-quality 24-bit WAV
+at a guessable URL, so the fetcher takes `…/sfx/<id>/<id>.wav` — **not** the
+`-preview.mp3` in the page markup, which is the browser player's downgrade.
+Confirm the licence at <https://mixkit.co/license/> before shipping a paid job;
+it is permissive but not ours to guarantee.
+
+### Cue shape
+
+```json
+{ "role": "whoosh", "at": 3.4 }
+{ "role": "impact", "at": 0.05, "gain": -3 }
+{ "role": "impact", "at": 8.1, "pick": 2 }
+{ "file": "assets/sfx/472-slow-sad-trombone-fail.wav",
+  "at": 4.0, "gain": -4, "trim": 0.1, "duration": 2.5, "fade_out": 0.3 }
+```
+
+`at` is required. `gain` is dB (default **-6**; -12…-4 is the working range,
+louder only for the opening hit). `trim` starts partway into the file,
+`duration` caps how much is used, `fade_out` tapers the tail so a sting does not
+end abruptly under a voice-over. `pick` chooses a specific file from a role.
+
+**Repeated roles rotate.** Four `whoosh` cues pull four *different* whooshes,
+cycling the pack in manifest order — deterministic, so a re-render is
+byte-comparable rather than "sounds different today".
+
+### Why the mix looks the way it does
+
+Cues are **summed into** the bed, not mixed *with* it:
+
+```
+[bed] ─┐
+       ├─ amix(normalize=0, duration=first) ─ afade ─ alimiter ─ [aout]
+[sfxall] ─┘
+```
+
+`amix` normalises by default — it divides by the input count — so folding
+effects into the existing two-input music mix would quietly duck the music by a
+further 1/N for every cue added, and a four-cue edit would sound measurably
+thinner than a one-cue edit for no musical reason. `normalize=0` keeps the bed
+where it was. The cost is that summing can exceed full scale, so a lookahead
+`alimiter` sits on the output. The fade moved *after* the effects for the same
+reason: an impact on the last beat should still be an impact.
+
+### Verifying a render
+
+ffmpeg exiting 0 says nothing about whether a sound is audible. A cue with the
+wrong gain, or an `at` that drifted, still renders a perfectly valid file.
+
+`sfx.py check` measures it. Given the same EDL rendered twice — once with its
+`sfx` block, once without (`--control`) — it subtracts the two decoded signals
+and reports what each cue actually contributed:
+
+```
+[check] test_sfx.mp4  18.48s  7 cue(s)
+[check] baseline -36.9 dBFS — residual vs test_control.mp4
+[check]   # role                           at    peak   added  verdict
+[check]   1 quick-zoom-impact            0.05  +0.51s  +24.1dB  OK
+[check]   2 fast-whoosh-transition       1.45  +0.71s  +14.8dB  OK
+[check]   3 cinematic-whoosh-fast-tran   3.45  +1.07s  +14.9dB  OK
+[check]   7 swirling-whoosh             14.45  +1.96s  +15.2dB  OK
+[check] every cue measurably landed
+```
+
+The `peak` column is where the cue's loudest moment landed relative to `at`.
+For a swell that is legitimately late (a whoosh peaks near its end); a peak
+*outside* the cue is flagged as a timing bug. The four whooshes above carry the
+same -7 dB gain and measure 14.8–15.2 dB, i.e. within 0.4 dB of each other —
+which is what a correct gain calculation looks like.
+
+Without `--control` the baseline is the clip-wide median, which is only good
+enough to catch a cue that is missing entirely.
 
 ---
 
@@ -316,9 +426,12 @@ select_clips.py     # stage 2 — Claude picks candidates (needs ANTHROPIC_API_K
 pick_moments.py     # stage 2b — objective scoring for speechless material
 render.py           # stage 3 — single-source reframe + focus crop + captions
 assemble.py         # stage 4 — multi-clip edit from an EDL + on-screen text
+fetch_sfx.py        # stage 4b — download / verify the royalty-free SFX pack
+sfx.py              # stage 4b — SFX cue layer + "did the cues land?" checker
 main.py             # orchestrator (stages 1-3)
 find_phrase.py      # helper — exact timestamp of a phrase, for clean cuts
 make_review.py      # helper — review.html for a folder of clips
+assets/sfx/         # curated SFX pack (committed — fixed inputs, not per-run output)
 docs/               # operational notes and campaign research
 input/              # source videos (gitignored)
 transcripts/        # whisper output JSON (gitignored)
@@ -359,6 +472,26 @@ output/             # rendered clips (gitignored)
   renderers now use `WrapStyle: 0`. Check every new string at the frame edges.
 - **Heavy CPU work starves GPU transcription.** Rendering while mlx-whisper runs
   dropped it from ~250 to ~77 mel-frames/s. Transcribe first, render after.
+- **`amix` normalises by default.** It divides by the input count, so every
+  effect folded into the music mix would duck the music further — eight cues and
+  the bed is 9× quieter for no musical reason. Pass `normalize=0` and put a
+  limiter on the output instead. `assemble.py` does both, but only when a cue
+  exists, so a no-SFX EDL is bit-identical to before the feature.
+- **Python's `wave` module cannot read WAVE_FORMAT_EXTENSIBLE (0xFFFE).** Mixkit
+  ships its 24-bit files that way, and `wave.open` fails with
+  `unknown format: 65534` — which reads exactly like a corrupt download and
+  isn't. `fetch_sfx.py` walks the RIFF chunks itself. Don't "fix" it by
+  re-downloading.
+- **A whoosh is a swell, so its first 400 ms are nearly silent.** Verifying a
+  cue by measuring the window at its start reports a perfectly good whoosh as
+  missing. Measure the cue's whole length — or subtract a no-SFX control render
+  and measure the residual, which is what `sfx.py check --control` does.
+- **Mixkit's `-preview.mp3` is not the asset.** The page markup is full of them
+  and they are the browser player's downgrade. The real file is
+  `https://assets.mixkit.co/active_storage/sfx/<id>/<id>.wav`, 24-bit, no auth.
+- **`adelay` needs `all=1` for stereo.** Without it the delay is applied to one
+  channel only and the cue arrives half-channeled — which sounds like a phase
+  problem, not a timing one, so it sends you looking in the wrong place.
 - **A campaign may pay nothing below a minimum-payout threshold.** Read
   `minPayoutCents`, not just the headline CPM — see
   `docs/whop-content-rewards.md`.
