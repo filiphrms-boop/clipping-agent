@@ -1,11 +1,32 @@
 # Clipping Agent
 
-Turns a long-form video (podcast, stream, webinar, gameplay capture) into
-captioned, 9:16 short-form clips.
+Turns long videos (podcasts, streams, webinars) into captioned 9:16 clips for
+TikTok, Reels and Shorts. It transcribes locally with Whisper, uses Claude to
+pick the strongest moments, and renders with ffmpeg.
 
-**Nothing here publishes anything.** Every stage writes files to disk. Posting,
-scheduling and campaign submission are deliberate human actions — see
-[Human in the loop](#human-in-the-loop).
+**What makes it different**
+
+- **Framing is handled properly.** A 9:16 crop of a 1080p frame keeps only 31%
+  of the width, so a centre crop can cut a speaker in half. Each clip can use a
+  padded layout or an off-centre crop aimed at the speaker.
+- **Captions track speech.** The active word is highlighted, and a timing pass
+  fixes Whisper's backwards-jittering timestamps so captions don't flicker.
+- **Human in the loop.** Nothing is ever published. Every stage writes files to
+  disk, and posting is a deliberate human action — see
+  [Human in the loop](#human-in-the-loop).
+
+Stack: Python, mlx-whisper / faster-whisper, Claude API, ffmpeg.
+
+**Quick start**
+
+```bash
+pip install -r requirements.txt
+export ANTHROPIC_API_KEY=sk-ant-...
+python3 main.py input/your_video.mp4
+```
+
+Needs an ffmpeg built with libass (see [Setup](#setup)). Pipeline details,
+framing notes and known limitations are below.
 
 ---
 
@@ -239,12 +260,14 @@ install, instead of failing inside ffmpeg.
 
 ### `uv` on PATH in non-interactive shells
 
-Background/automation shells do **not** inherit `~/.hermes/bin`, so a bare `uv`
-can fail with `command not found` and abort an install script silently. Either
-call it by absolute path or export PATH first:
+Background/automation shells (cron, CI, agent runners) often don't load your
+interactive shell profile, so a bare `uv` can fail with `command not found` and
+abort an install script silently. Either call it by absolute path or export
+PATH first, adding the directory where `uv` lives (`which uv` in a normal
+terminal shows it):
 
 ```bash
-export PATH="$HOME/.hermes/bin:/opt/homebrew/bin:$PATH"
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:$PATH"
 ```
 
 ---
@@ -342,27 +365,7 @@ output/             # rendered clips (gitignored)
   prefer a correction pass over silently trusting the transcript.
 - **No auto-posting**, by design — see [Human in the loop](#human-in-the-loop).
 
-## Pitfalls worth knowing
+## Pitfalls
 
-- **Whisper word timings jitter backwards.** Captions stack on the same frames
-  and flicker unless normalised. Both `render.py` and `assemble.py` handle it.
-- **Filtergraph chains must be joined with `;`.** Concatenating them with an
-  empty string makes ffmpeg read the next input pad as a second input to the
-  previous filter, and it fails with a bare `Invalid argument`.
-- **ffmpeg expressions inside filter args need their commas escaped.** A
-  `max(0,min(...))` in a `crop` x-position will otherwise be read as two
-  arguments. `_focus_expr` escapes them.
-- **`ass=` needs a path that doesn't require escaping.** Write the `.ass` into a
-  scratch directory and run ffmpeg with that as its cwd.
-- **`WrapStyle: 2` disables word wrapping — long text gets CLIPPED, not
-  wrapped.** Short labels fit, so it hides until someone adds a long one. Both
-  renderers now use `WrapStyle: 0`. Check every new string at the frame edges.
-- **Heavy CPU work starves GPU transcription.** Rendering while mlx-whisper runs
-  dropped it from ~250 to ~77 mel-frames/s. Transcribe first, render after.
-- **A campaign may pay nothing below a minimum-payout threshold.** Read
-  `minPayoutCents`, not just the headline CPM — see
-  `docs/whop-content-rewards.md`.
-- **Rank campaigns by the view gate, not the CPM.** `minPayout ÷ rate × 1000` is
-  the views one clip needs before it earns a cent. A high CPM with a high gate
-  pays worse than a lower CPM you can actually clear. The *cap* matters too: it
-  decides the views at which a hit stops earning.
+Whisper timing jitter, ffmpeg filtergraph quirks, caption wrapping and campaign
+payout maths are written up in [docs/pitfalls.md](docs/pitfalls.md).
